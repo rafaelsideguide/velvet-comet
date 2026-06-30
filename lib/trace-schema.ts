@@ -1,6 +1,6 @@
 import { z } from "zod";
 
-export const TraceModeSchema = z.enum(["fixture", "live"]);
+export const TraceModeSchema = z.literal("live");
 export const TraceStatusSchema = z.enum(["passed", "failed", "partial", "invalid"]);
 export const StepStatusSchema = z.enum(["pending", "passed", "failed", "skipped"]);
 export const DiagnosisCodeSchema = z.enum([
@@ -118,7 +118,7 @@ export const FirecrawlOptionsSchema = z.object({
 });
 
 export const TraceRequestInputSchema = z.object({
-  mode: TraceModeSchema.default("fixture"),
+  mode: TraceModeSchema.default("live"),
   exampleId: z.string().max(120).optional(),
   url: z.string().url(),
   actions: z.array(z.record(z.unknown())).min(1).max(20),

@@ -56,6 +56,30 @@ export class FirecrawlTraceClient {
     };
   }
 
+  async scrapeWithActions(request: TraceRequestInput, actions: Array<Record<string, unknown>>) {
+    if (!this.apiKey) throw new Error("FIRECRAWL_API_KEY is required for live mode.");
+
+    const body = {
+      url: request.url,
+      formats: ["markdown", "screenshot"],
+      actions,
+      onlyMainContent: request.firecrawl.onlyMainContent,
+      waitFor: request.firecrawl.waitFor,
+      timeout: request.firecrawl.timeout,
+      mobile: request.firecrawl.mobile,
+      proxy: request.firecrawl.proxy,
+      storeInCache: false,
+      ...(request.firecrawl.location ? { location: request.firecrawl.location } : {}),
+      ...(request.firecrawl.profile?.name ? { profile: request.firecrawl.profile } : {})
+    };
+
+    return this.fetchJson("/scrape", {
+      method: "POST",
+      body: JSON.stringify(body),
+      timeoutMs: request.firecrawl.timeout
+    });
+  }
+
   async interact(scrapeId: string, code: string, options: FirecrawlOptions) {
     const json = await this.fetchJson(`/scrape/${encodeURIComponent(scrapeId)}/interact`, {
       method: "POST",

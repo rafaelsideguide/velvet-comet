@@ -23,12 +23,11 @@ Build a demo-grade Next.js workbench at the app root named **Action Trace Workbe
 The app will include:
 
 - Firecrawl-like dashboard shell: left nav, top utility bar, dark panels, orange primary actions, compact metric cards, and monospace code surfaces.
-- Trace setup panel: URL input, action JSON editor, optional checks editor, Firecrawl option controls, fixture/live mode selector, and three built-in examples.
+- Trace setup panel: URL input, action JSON editor, optional checks editor, Firecrawl option controls, and three built-in live examples.
 - Trace timeline: one stable row per action with index, action type, selector/text summary, status, duration, and checkpoint availability.
 - Checkpoint inspector: screenshot, text/markdown excerpt, raw event JSON, and generated Interact code for the selected step.
 - Diagnosis panel: deterministic failure code, evidence bullets, suggested fix, and related Firecrawl options to try.
 - Export controls: JSON and Markdown reports that support engineers or agents can read without rerunning the trace.
-- Fixture mode: deterministic local reports for all examples so reviewers can test without an API key.
 - Live mode: Firecrawl-backed execution when `FIRECRAWL_API_KEY` is present.
 
 The exact product surface is **action-step observability for Firecrawl workflows**. It is not a broad browser automation editor. Users paste a Firecrawl-style action chain, run it, and get the first failed step with evidence.
@@ -110,12 +109,10 @@ Core workflow:
 For every trace, the server does this:
 
 1. Parse and validate the request with local schemas.
-2. If `mode` is `fixture`, return a seeded trace report for the selected example.
-3. If `mode` is `live`, require `FIRECRAWL_API_KEY`.
-4. Create a Firecrawl scrape session with `POST /v2/scrape`.
-5. Read `data.metadata.scrapeId` from the setup response.
-6. For each action, translate exactly one Firecrawl action into one Interact code block.
-7. Execute that block with `POST /v2/scrape/{scrapeId}/interact`.
+2. Require `FIRECRAWL_API_KEY`.
+3. For each action, replay the action prefix through `POST /v2/scrape`.
+4. Request markdown and screenshot output for every checkpoint.
+5. Stop at the first failed action or failed check.
 8. Capture screenshot, URL, title, text excerpt, duration, stdout/stderr, and raw result.
 9. Run post-step checks such as `selector_exists` or `url_matches`.
 10. Stop at the first failed action or failed check.
@@ -309,7 +306,7 @@ Next.js UI
 Trace Controller
   |
   +-- validate request
-  +-- choose fixture or live mode
+  +-- create live trace record
   +-- create trace record
   v
 Trace Runner
@@ -366,7 +363,7 @@ Trace Report
 `lib/examples.ts`
 
 - Three built-in test examples.
-- Fixture reports for key demo states.
+- Three built-in live examples.
 
 `app/api/traces/route.ts`
 
@@ -448,7 +445,7 @@ Required UI components:
   - Code
 - diagnosis panel
 - export controls
-- fixture/live mode badge
+- live mode badge
 
 Do not include marketing hero copy. This should feel like a Firecrawl operator tool.
 
@@ -460,7 +457,7 @@ Do not include marketing hero copy. This should feel like a Firecrawl operator t
 
 ```json
 {
-  "mode": "fixture",
+  "mode": "live",
   "exampleId": "selector-missing-books",
   "url": "https://books.toscrape.com/",
   "actions": [
@@ -488,7 +485,7 @@ Response:
 {
   "id": "trace_01JZX8RK6QK9W94H8G4H9NP8QS",
   "status": "failed",
-  "mode": "fixture",
+  "mode": "live",
   "failedStepIndex": 3,
   "durationMs": 12420,
   "diagnosis": {
@@ -546,14 +543,13 @@ Response:
 
 ## Three Test Examples
 
-Agents should be able to test all three examples in fixture mode without a Firecrawl key. With `FIRECRAWL_API_KEY`, they can also run them live against public pages.
+Agents should be able to test all three examples live with `FIRECRAWL_API_KEY` configured.
 
 Agent test instructions:
 
 - `GET /api/examples` returns the available example IDs and payloads.
-- `POST /api/traces` with `"mode": "fixture"` and an `exampleId` must work without network calls to Firecrawl.
-- `POST /api/traces` with `"mode": "live"` uses the same example payload against Firecrawl when `FIRECRAWL_API_KEY` is configured.
-- Each example must produce a deterministic expected diagnosis in fixture mode.
+- `POST /api/traces` uses the selected example payload against Firecrawl.
+- Each example should produce a meaningful diagnosis from live Firecrawl evidence.
 
 ### 1. Selector Missing After Valid Setup
 
@@ -651,8 +647,8 @@ Expected UI:
 Behavior:
 
 - Missing API key:
-  - use fixture mode
-  - show `Fixture mode` badge
+  - return a clear `FIRECRAWL_ERROR`
+  - show that live tracing requires `FIRECRAWL_API_KEY`
   - do not crash the app
 - Invalid action JSON:
   - reject before any Firecrawl call
@@ -686,14 +682,13 @@ Status rules:
 - `write` requires focus. The app should warn when a `write` action is not preceded by a click/focus-like step.
 - Some selectors exist but are hidden or covered. Diagnosis should say "likely" and show raw evidence.
 - Captchas/login walls can masquerade as empty extraction. Use `POSSIBLE_BLOCK` when evidence is ambiguous.
-- Public test pages can change. Fixture mode is required for reliable review.
+- Public test pages can change. The app should surface raw evidence when live examples drift.
 
 ## Success Metrics
 
 Demo metrics:
 
-- all three built-in examples run in fixture mode
-- at least one built-in example runs live with a Firecrawl key
+- all three built-in examples run live with a Firecrawl key
 - failed step index is visible within one second after trace completion
 - export includes action array, failed step, evidence, and suggested fix
 - UI visually matches Firecrawl dashboard style
@@ -711,8 +706,8 @@ Build:
 
 - Next.js app with Firecrawl-like dark UI
 - local `/api/traces` routes
-- fixture mode with three examples
-- live mode using Firecrawl scrape + interact
+- live mode with three examples
+- live mode using Firecrawl scrape prefix replay
 - deterministic action translator
 - deterministic trace analyzer
 - timeline, screenshot/text/raw inspector

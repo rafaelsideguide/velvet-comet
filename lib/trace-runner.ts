@@ -1,12 +1,7 @@
-import { generateInteractCode, translateActionToPlaywright } from "@/lib/action-translator";
+import { translateActionToPlaywright } from "@/lib/action-translator";
 import { buildDiagnosis, classifyStepFailure, evaluateChecks } from "@/lib/trace-analyzer";
-import {
-  buildGenericFixtureReport,
-  defaultFirecrawlOptions,
-  getExample,
-  getFixtureReport
-} from "@/lib/examples";
-import { FirecrawlTraceClient, parseInteractSnapshot } from "@/lib/firecrawl-trace-client";
+import { defaultFirecrawlOptions, getExample } from "@/lib/examples";
+import { FirecrawlTraceClient } from "@/lib/firecrawl-trace-client";
 import {
   normalizeActions,
   TraceReportSchema,
@@ -18,7 +13,7 @@ import {
 } from "@/lib/trace-schema";
 
 export async function runTrace(input: TraceRequestInput): Promise<TraceReport> {
-  const id = input.mode === "fixture" && input.exampleId ? `fixture_${input.exampleId}` : `trace_${Date.now().toString(36)}`;
+  const id = `trace_${Date.now().toString(36)}`;
   const firecrawl = { ...defaultFirecrawlOptions, ...input.firecrawl };
 
   let actions: FirecrawlAction[];
@@ -36,18 +31,6 @@ export async function runTrace(input: TraceRequestInput): Promise<TraceReport> {
     throw error;
   }
 
-  if (input.mode === "fixture") {
-    const fixture = getFixtureReport(input.exampleId ?? "");
-    if (fixture) return fixture;
-    return buildGenericFixtureReport({
-      id,
-      url: input.url,
-      actions: input.actions,
-      checks: input.checks,
-      firecrawl
-    });
-  }
-
   return runLiveTrace({ ...input, firecrawl }, actions, id);
 }
 
@@ -58,39 +41,57 @@ async function runLiveTrace(input: TraceRequestInput, actions: FirecrawlAction[]
   const steps: TraceStep[] = [];
   const warnings: string[] = [];
   let scrapeId: string | undefined;
-  let setupRaw: unknown;
-  let cleanupWarning: string | undefined;
   let diagnosis: TraceReport["diagnosis"] = null;
   let failedStepIndex: number | null = null;
   let firecrawlCalls = 0;
-  let liveViewUrl: string | undefined;
 
   if (!client.hasApiKey()) {
     return firecrawlErrorReport({
       id,
       input,
       createdAt,
-      message: "FIRECRAWL_API_KEY is required for live mode. Switch to fixture mode to run the demo without a key."
+      message: "FIRECRAWL_API_KEY is required for live mode."
     });
   }
 
   try {
-    const setup = await client.createBrowserContext(input);
-    firecrawlCalls += 1;
-    scrapeId = setup.scrapeId;
-    setupRaw = setup.raw;
-
     for (let index = 0; index < actions.length; index += 1) {
       const action = actions[index];
       const translated = translateActionToPlaywright(action);
       warnings.push(...translated.warnings.map((warning) => `Step ${index + 1}: ${warning}`));
-      const generated = generateInteractCode(action, input.firecrawl.timeout);
+      const startedAt = Date.now();
+      let raw: unknown;
+      let step: TraceStep;
 
-      const raw = await client.interact(scrapeId, generated.code, input.firecrawl);
-      firecrawlCalls += 1;
-      liveViewUrl = liveViewUrl ?? extractLiveViewUrl(raw);
-      const snapshot = parseInteractSnapshot(raw);
-      const step = snapshotToStep(index, action, generated.code, snapshot, raw);
+      try {
+        raw = await client.scrapeWithActions(input, actions.slice(0, index + 1));
+        firecrawlCalls += 1;
+        step = scrapeResponseToStep({
+          index,
+          action,
+          generatedCode: `POST /v2/scrape with actions[0..${index}]`,
+          raw,
+          durationMs: Date.now() - startedAt
+        });
+        scrapeId = scrapeId ?? extractScrapeId(raw);
+      } catch (error) {
+        firecrawlCalls += 1;
+        const message = error instanceof Error ? error.message : String(error);
+        const previousStep = steps[steps.length - 1];
+        step = {
+          index,
+          action,
+          status: "failed",
+          durationMs: Date.now() - startedAt,
+          url: previousStep?.url,
+          title: previousStep?.title,
+          textExcerpt: previousStep?.textExcerpt,
+          screenshotBase64: previousStep?.screenshotBase64,
+          generatedCode: `POST /v2/scrape with actions[0..${index}]`,
+          error: message,
+          raw: { error: message }
+        };
+      }
 
       if (step.status === "failed") {
         failedStepIndex = index;
@@ -105,6 +106,7 @@ async function runLiveTrace(input: TraceRequestInput, actions: FirecrawlAction[]
 
       const checkResult = evaluateChecks({
         checks: input.checks,
+        action,
         step,
         isFinalStep: index === actions.length - 1
       });
@@ -132,7 +134,6 @@ async function runLiveTrace(input: TraceRequestInput, actions: FirecrawlAction[]
         input,
         createdAt,
         scrapeId,
-        setupRaw,
         firecrawlCalls,
         message
       });
@@ -144,21 +145,12 @@ async function runLiveTrace(input: TraceRequestInput, actions: FirecrawlAction[]
       status: "failed",
       durationMs: Date.now() - startedAt,
       error: message,
-      raw: { setupRaw }
+      raw: { error: message }
     };
     failedStepIndex = index;
     diagnosis = buildDiagnosis("FIRECRAWL_ERROR", { step, action: actions[index] });
     steps.push(step);
     appendSkippedSteps(steps, actions, index + 1);
-  } finally {
-    if (scrapeId) {
-      try {
-        await client.stop(scrapeId);
-        firecrawlCalls += 1;
-      } catch (error) {
-        cleanupWarning = `Cleanup failed for scrapeId ${scrapeId}: ${error instanceof Error ? error.message : String(error)}`;
-      }
-    }
   }
 
   if (!diagnosis && steps.length === actions.length) {
@@ -174,19 +166,16 @@ async function runLiveTrace(input: TraceRequestInput, actions: FirecrawlAction[]
     }
   }
 
-  if (cleanupWarning) warnings.push(cleanupWarning);
-
   const completedAt = new Date().toISOString();
   const report: TraceReport = {
     id,
-    status: diagnosis ? (cleanupWarning ? "partial" : "failed") : cleanupWarning ? "partial" : "passed",
+    status: diagnosis ? "failed" : "passed",
     mode: "live",
     url: input.url,
     createdAt,
     completedAt,
     durationMs: Date.now() - startedAt,
     scrapeId,
-    liveViewUrl,
     failedStepIndex,
     summary: {
       stepsPlanned: actions.length,
@@ -205,42 +194,6 @@ async function runLiveTrace(input: TraceRequestInput, actions: FirecrawlAction[]
   return TraceReportSchema.parse(report);
 }
 
-function snapshotToStep(
-  index: number,
-  action: FirecrawlAction,
-  generatedCode: string,
-  snapshot: Record<string, unknown> | null,
-  raw: unknown
-): TraceStep {
-  if (!snapshot) {
-    const rawError = extractRawError(raw);
-    return {
-      index,
-      action,
-      status: "failed",
-      durationMs: 0,
-      generatedCode,
-      error: rawError ?? "Interact response did not include a parseable action trace snapshot.",
-      raw
-    };
-  }
-
-  const ok = snapshot.ok !== false;
-  return {
-    index,
-    action,
-    status: ok ? "passed" : "failed",
-    durationMs: typeof snapshot.durationMs === "number" ? Math.max(0, Math.round(snapshot.durationMs)) : 0,
-    url: typeof snapshot.url === "string" ? snapshot.url : undefined,
-    title: typeof snapshot.title === "string" ? snapshot.title : undefined,
-    textExcerpt: typeof snapshot.textExcerpt === "string" ? snapshot.textExcerpt : undefined,
-    screenshotBase64: typeof snapshot.screenshotBase64 === "string" ? snapshot.screenshotBase64 : undefined,
-    generatedCode,
-    error: typeof snapshot.error === "string" ? snapshot.error : undefined,
-    raw
-  };
-}
-
 function extractRawError(raw: unknown) {
   if (!raw || typeof raw !== "object") return null;
   const record = raw as Record<string, unknown>;
@@ -250,10 +203,48 @@ function extractRawError(raw: unknown) {
   return null;
 }
 
-function extractLiveViewUrl(raw: unknown) {
+function scrapeResponseToStep(params: {
+  index: number;
+  action: FirecrawlAction;
+  generatedCode: string;
+  raw: unknown;
+  durationMs: number;
+}): TraceStep {
+  const raw = params.raw && typeof params.raw === "object" ? (params.raw as Record<string, unknown>) : {};
+  const data = raw.data && typeof raw.data === "object" ? (raw.data as Record<string, unknown>) : {};
+  const metadata = data.metadata && typeof data.metadata === "object" ? (data.metadata as Record<string, unknown>) : {};
+  const success = raw.success !== false;
+  const markdown = typeof data.markdown === "string" ? data.markdown : "";
+  const screenshot = typeof data.screenshot === "string" ? normalizeScreenshotBase64(data.screenshot) : undefined;
+  const error = extractRawError(raw);
+
+  return {
+    index: params.index,
+    action: params.action,
+    status: success ? "passed" : "failed",
+    durationMs: Math.max(0, Math.round(params.durationMs)),
+    url: typeof metadata.url === "string" ? metadata.url : undefined,
+    title: typeof metadata.title === "string" ? metadata.title.trim() : undefined,
+    textExcerpt: markdown.slice(0, 1200),
+    screenshotBase64: screenshot,
+    generatedCode: params.generatedCode,
+    error: success ? undefined : error ?? "Firecrawl scrape prefix failed.",
+    raw
+  };
+}
+
+function extractScrapeId(raw: unknown) {
   if (!raw || typeof raw !== "object") return undefined;
   const record = raw as Record<string, unknown>;
-  return typeof record.liveViewUrl === "string" ? record.liveViewUrl : undefined;
+  const data = record.data && typeof record.data === "object" ? (record.data as Record<string, unknown>) : {};
+  const metadata = data.metadata && typeof data.metadata === "object" ? (data.metadata as Record<string, unknown>) : {};
+  return typeof metadata.scrapeId === "string" ? metadata.scrapeId : undefined;
+}
+
+function normalizeScreenshotBase64(value: string) {
+  const marker = ";base64,";
+  const index = value.indexOf(marker);
+  return index >= 0 ? value.slice(index + marker.length) : value;
 }
 
 function appendSkippedSteps(steps: TraceStep[], actions: FirecrawlAction[], startIndex: number) {
@@ -286,7 +277,7 @@ function unsupportedActionReport(params: {
   return {
     id: params.id,
     status: "invalid",
-    mode: params.input.mode,
+    mode: "live",
     url: params.input.url,
     createdAt,
     completedAt: createdAt,
@@ -347,7 +338,7 @@ function firecrawlErrorReport(params: {
   return {
     id: params.id,
     status: "failed",
-    mode: params.input.mode,
+    mode: "live",
     url: params.input.url,
     createdAt: params.createdAt,
     completedAt,
@@ -386,7 +377,7 @@ export function examplePayload(exampleId: string) {
   const example = getExample(exampleId);
   if (!example) return null;
   return {
-    mode: "fixture" as const,
+    mode: "live" as const,
     exampleId: example.id,
     url: example.url,
     actions: example.actions,

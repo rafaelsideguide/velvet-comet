@@ -6,7 +6,7 @@ export async function GET() {
     examples: examples.map((example) => ({
       ...example,
       payload: {
-        mode: "fixture",
+        mode: "live",
         exampleId: example.id,
         url: example.url,
         actions: example.actions,

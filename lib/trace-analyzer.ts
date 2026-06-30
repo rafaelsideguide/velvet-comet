@@ -109,7 +109,9 @@ export function buildDiagnosis(code: DiagnosisCode, context: {
     code: "FIRECRAWL_ERROR",
     message: "Firecrawl returned an upstream error before the trace runner could narrow it further.",
     evidence,
-    suggestedFix: "Retry once, then inspect the raw response and consider proxy, timeout, or location changes if the page is protected or slow.",
+    suggestedFix: hasInteractRuntimeMismatch(evidence)
+      ? "The live Interact runtime rejected the generated Playwright code. Confirm Firecrawl's code execution wrapper before debugging selectors or waits."
+      : "Retry once, then inspect the raw response and consider proxy, timeout, or location changes if the page is protected or slow.",
     relatedOptions: ["proxy", "timeout", "location.country", "mobile"]
   };
 }
@@ -118,6 +120,9 @@ export function classifyStepFailure(action: FirecrawlAction, step: TraceStep): D
   const error = `${step.error ?? ""} ${step.textExcerpt ?? ""}`.toLowerCase();
 
   if (hasBlockSignal(step.textExcerpt) || hasBlockSignal(step.error)) return "POSSIBLE_BLOCK";
+  if (error.includes("await is only valid") || error.includes("illegal return statement") || error.includes("repl:")) {
+    return "FIRECRAWL_ERROR";
+  }
   if (
     action.type === "executeJavascript" ||
     error.includes("javascript") ||
@@ -136,6 +141,7 @@ export function classifyStepFailure(action: FirecrawlAction, step: TraceStep): D
 
 export function evaluateChecks(params: {
   checks: TraceCheck[];
+  action: FirecrawlAction;
   step: TraceStep;
   isFinalStep: boolean;
 }) {
@@ -172,7 +178,20 @@ export function evaluateChecks(params: {
 
     const text = params.step.textExcerpt ?? "";
     if (check.type === "selector_exists") {
-      continue;
+      return {
+        ok: false,
+        failure: {
+          code:
+            params.action.type === "wait" && params.action.selector === check.selector
+              ? ("WAIT_TIMEOUT" as DiagnosisCode)
+              : ("SELECTOR_NOT_FOUND" as DiagnosisCode),
+          message: `The live checkpoint could not verify selector ${check.selector}.`,
+          evidence: [
+            `Expected selector: ${check.selector}`,
+            "Prefix replay captures markdown and screenshot evidence, but no DOM confirmation was returned for this selector check."
+          ]
+        }
+      };
     }
     if (check.type === "text_contains" && !text.includes(check.text)) {
       return {
@@ -208,4 +227,9 @@ export function hasBlockSignal(value: string | undefined) {
 function getSelector(action: FirecrawlAction | Record<string, unknown> | undefined) {
   if (!action || !("selector" in action)) return null;
   return typeof action.selector === "string" ? action.selector : null;
+}
+
+function hasInteractRuntimeMismatch(evidence: string[]) {
+  const text = evidence.join(" ").toLowerCase();
+  return text.includes("await is only valid") || text.includes("illegal return statement") || text.includes("repl:");
 }

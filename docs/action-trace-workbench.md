@@ -486,9 +486,9 @@ Build enough to make the value obvious:
    - JSON trace export.
    - Markdown debug report for support or teammates.
 
-6. **Seeded offline demo**
-   - Include a stored trace fixture so reviewers can see the UI without burning credits.
-   - Clearly label fixture mode vs live Firecrawl mode.
+6. **Live example workflows**
+   - Include three preloaded public-page examples.
+   - Always execute them through Firecrawl so the demo reflects real API behavior.
 
 ## What Not To Build
 
@@ -596,7 +596,7 @@ The demo can be credible without changing Firecrawl internals:
 - Request screenshot and markdown outputs.
 - Store trace results in local JSON or memory.
 - Build a single Next.js dashboard with form, timeline, inspector, and export.
-- Include fixture traces so the reviewer can see the product even without credits.
+- Include live example traces so the reviewer can exercise the product against public pages.
 - Keep the diagnosis rules deterministic and explainable.
 
 The code remains easy to walk through:
