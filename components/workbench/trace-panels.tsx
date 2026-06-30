@@ -1,5 +1,7 @@
+"use client";
+
+import { useState } from "react";
 import {
-  Activity,
   AlertTriangle,
   CheckCircle2,
   CircleHelp,
@@ -10,7 +12,6 @@ import {
   ExternalLink,
   FileJson,
   Image as ImageIcon,
-  Loader2,
   MousePointerClick,
   PanelRight,
   Radio,
@@ -33,82 +34,14 @@ import {
 import { cn, formatDuration, summarizeAction } from "@/lib/utils";
 import type { TraceReport, TraceStep } from "@/lib/trace-schema";
 
-export function MetricStrip({
-  report,
-  isRunning,
-}: {
-  report: TraceReport | null;
-  isRunning: boolean;
-}) {
-  const metrics = [
-    {
-      label: "Status",
-      value: isRunning
-        ? "Running"
-        : report
-          ? formatStatus(report.status)
-          : "Ready",
-      icon: isRunning ? (
-        <Loader2 className="h-4 w-4 animate-spin" />
-      ) : (
-        <Activity className="h-4 w-4" />
-      ),
-    },
-    {
-      label: "Failed step",
-      value:
-        report?.failedStepIndex == null
-          ? "None"
-          : `#${report.failedStepIndex + 1}`,
-      icon: <AlertTriangle className="h-4 w-4" />,
-    },
-    {
-      label: "Duration",
-      value: report ? formatDuration(report.durationMs) : "N/A",
-      icon: <Clock className="h-4 w-4" />,
-    },
-    {
-      label: "API calls",
-      value: report ? String(report.summary.firecrawlCalls) : "0",
-      icon: <Radio className="h-4 w-4" />,
-    },
-    {
-      label: "Screenshots",
-      value: report ? String(report.summary.screenshotsCaptured) : "0",
-      icon: <ImageIcon className="h-4 w-4" />,
-    },
-  ];
-
-  return (
-    <div className="grid grid-cols-2 border-b border-[var(--border)] bg-[#080808] md:grid-cols-5">
-      {metrics.map((metric) => (
-        <div
-          key={metric.label}
-          className="flex min-h-20 items-center justify-between border-r border-t border-[var(--border)] px-4 py-3 first:border-t-0 md:border-t-0"
-        >
-          <div>
-            <div className="text-[11px] font-medium text-[var(--muted)]">
-              {metric.label}
-            </div>
-            <div className="mt-2 text-base font-semibold text-[var(--foreground)]">
-              {metric.value}
-            </div>
-          </div>
-          <div className="flex h-8 w-8 items-center justify-center rounded-[4px] border border-[var(--border)] bg-[#101010] text-[var(--accent)]">
-            {metric.icon}
-          </div>
-        </div>
-      ))}
-    </div>
-  );
-}
-
 export function OutcomePanel({
   report,
   selectedStep,
+  isRunning,
 }: {
   report: TraceReport | null;
   selectedStep: TraceStep | null;
+  isRunning: boolean;
 }) {
   if (!report) return null;
 
@@ -121,10 +54,33 @@ export function OutcomePanel({
     : selectedStep
       ? summarizeAction(selectedStep.action)
       : "No failed action";
+  const metrics = [
+    {
+      label: "Status",
+      value: isRunning ? "Running" : formatStatus(report.status),
+      icon: <Radio className="h-3.5 w-3.5" />,
+    },
+    {
+      label: "Failed step",
+      value:
+        report.failedStepIndex == null ? "None" : `#${report.failedStepIndex + 1}`,
+      icon: <AlertTriangle className="h-3.5 w-3.5" />,
+    },
+    {
+      label: "Duration",
+      value: formatDuration(report.durationMs),
+      icon: <Clock className="h-3.5 w-3.5" />,
+    },
+    {
+      label: "Calls",
+      value: String(report.summary.firecrawlCalls),
+      icon: <Radio className="h-3.5 w-3.5" />,
+    },
+  ];
 
   return (
-    <section className="border-b border-[var(--border)] bg-[#0d0907]">
-      <div className="grid gap-4 px-4 py-4 sm:px-6 lg:grid-cols-[minmax(0,1fr)_minmax(260px,0.65fr)]">
+    <section className="border-b border-[var(--border)] bg-[#0b0908]">
+      <div className="grid gap-4 px-4 py-4 sm:px-6 lg:grid-cols-[minmax(0,1fr)_minmax(280px,0.72fr)]">
         <div className="min-w-0">
           <div className="mb-2 flex flex-wrap items-center gap-3">
             <BracketTag tone={toneForStatus(report.status)}>
@@ -159,6 +115,24 @@ export function OutcomePanel({
             {report.diagnosis?.message ??
               "All planned actions and checks completed."}
           </p>
+          <div className="mt-4 grid grid-cols-2 gap-2 md:grid-cols-4">
+            {metrics.map((metric) => (
+              <div
+                key={metric.label}
+                className="flex items-center justify-between border border-[var(--border)] bg-[#101010] px-3 py-2"
+              >
+                <div className="min-w-0">
+                  <div className="text-[10px] font-medium uppercase text-[var(--muted)]">
+                    {metric.label}
+                  </div>
+                  <div className="mt-1 truncate text-sm font-semibold">
+                    {metric.value}
+                  </div>
+                </div>
+                <div className="text-[var(--accent)]">{metric.icon}</div>
+              </div>
+            ))}
+          </div>
         </div>
         <div className="border border-[var(--border)] bg-[#101010] p-3">
           <div className="text-[11px] font-medium text-[var(--muted)]">
@@ -167,79 +141,13 @@ export function OutcomePanel({
           <p className="mt-2 text-sm leading-6 text-[var(--foreground)]">
             {report.diagnosis?.suggestedFix ?? "No change needed."}
           </p>
+          <p className="mt-3 border-t border-[var(--border)] pt-3 text-xs leading-5 text-[var(--muted)]">
+            {report.mode === "recorded"
+              ? "Recorded trace is bundled so the demo opens without credits."
+              : `Prefix replay used ${report.summary.firecrawlCalls} scrape calls; production should emit runner-native step events.`}
+          </p>
         </div>
       </div>
-    </section>
-  );
-}
-
-export function BeforeAfterPanel({ report }: { report: TraceReport | null }) {
-  if (!report) return null;
-  const failedStep =
-    report.failedStepIndex == null
-      ? null
-      : report.steps.find((step) => step.index === report.failedStepIndex);
-  const failedStepLabel = failedStep
-    ? `Step ${failedStep.index + 1}`
-    : "No failed step";
-  const diagnosis = report.diagnosis?.code ?? "CLEAR";
-
-  return (
-    <section className="grid border-b border-[var(--border)] bg-[#080808] lg:grid-cols-2">
-      <div className="border-b border-[var(--border)] p-4 lg:border-b-0 lg:border-r">
-        <div className="mb-2 flex items-center gap-2">
-          <BracketTag tone="yellow">Before</BracketTag>
-          <span className="text-xs text-[var(--muted)]">
-            Native failure surface
-          </span>
-        </div>
-        <div className="text-sm font-semibold text-[var(--foreground)]">
-          SCRAPE_FAILED
-        </div>
-        <p className="mt-2 text-xs leading-5 text-[var(--muted)]">
-          One run-level error after {report.actions.length} actions, with no
-          built-in checkpoint trail.
-        </p>
-      </div>
-      <div className="p-4">
-        <div className="mb-2 flex items-center gap-2">
-          <BracketTag tone={report.status === "failed" ? "red" : "green"}>
-            After
-          </BracketTag>
-          <span className="text-xs text-[var(--muted)]">
-            Action Trace evidence
-          </span>
-        </div>
-        <div className="text-sm font-semibold text-[var(--foreground)]">
-          {failedStepLabel}: {diagnosis}
-        </div>
-        <p className="mt-2 text-xs leading-5 text-[var(--muted)]">
-          Timeline, screenshot, parsed selector counts, raw response, and
-          support-ready export are attached to the failure.
-        </p>
-      </div>
-    </section>
-  );
-}
-
-export function TraceFidelityPanel({ report }: { report: TraceReport | null }) {
-  if (!report) return null;
-  const costText =
-    report.mode === "recorded"
-      ? "Recorded fixture. Live run uses the same prefix-replay plan."
-      : `${report.summary.firecrawlCalls} Firecrawl scrape calls for ${report.summary.stepsPlanned} planned actions.`;
-
-  return (
-    <section className="grid border-b border-[var(--border)] bg-[#0a0a0a] md:grid-cols-3">
-      <TraceNote label="Trace Cost" value={costText} />
-      <TraceNote
-        label="Fidelity"
-        value="Prototype uses prefix replay; production should instrument Firecrawl's runner-native step events."
-      />
-      <TraceNote
-        label="Sharing"
-        value="Redacted export removes screenshots, raw payloads, live URLs, and likely secrets before support handoff."
-      />
     </section>
   );
 }
@@ -353,10 +261,14 @@ export function CheckpointInspector({
       <div className="p-4">
         {step ? (
           <Tabs defaultValue="screenshot">
-            <TabsList className="grid w-full grid-cols-4">
+            <TabsList className="grid w-full grid-cols-5">
               <TabsTrigger value="screenshot">
                 <ImageIcon className="mr-1 h-3.5 w-3.5" />
                 Shot
+              </TabsTrigger>
+              <TabsTrigger value="probe">
+                <MousePointerClick className="mr-1 h-3.5 w-3.5" />
+                Probe
               </TabsTrigger>
               <TabsTrigger value="text">
                 <ScrollText className="mr-1 h-3.5 w-3.5" />
@@ -373,19 +285,16 @@ export function CheckpointInspector({
             </TabsList>
             <TabsContent value="screenshot">
               {step.screenshotBase64 ? (
-                <div className="overflow-hidden border border-[var(--border)] bg-[#101010]">
-                  <img
-                    src={screenshotSrc(step.screenshotBase64)}
-                    alt=""
-                    className="aspect-[16/10] w-full object-cover"
-                  />
-                </div>
+                <TraceScreenshot source={step.screenshotBase64} />
               ) : (
                 <EmptyState
                   icon={<ImageIcon className="h-5 w-5" />}
                   title="No screenshot"
                 />
               )}
+            </TabsContent>
+            <TabsContent value="probe">
+              <SelectorProbe step={step} />
             </TabsContent>
             <TabsContent value="text">
               <CodeBlock
@@ -412,6 +321,89 @@ export function CheckpointInspector({
         )}
       </div>
     </section>
+  );
+}
+
+function TraceScreenshot({ source }: { source: string }) {
+  const [failed, setFailed] = useState(false);
+
+  if (failed) {
+    return (
+      <EmptyState
+        icon={<ImageIcon className="h-5 w-5" />}
+        title="Screenshot could not load"
+      />
+    );
+  }
+
+  return (
+    <div className="overflow-hidden border border-[var(--border)] bg-[#050505]">
+      {/* eslint-disable-next-line @next/next/no-img-element -- Trace screenshots may be captured data URIs or Firecrawl-hosted URLs. */}
+      <img
+        src={screenshotSrc(source)}
+        alt="Checkpoint screenshot"
+        className="max-h-[560px] min-h-56 w-full object-contain"
+        onError={() => setFailed(true)}
+      />
+    </div>
+  );
+}
+
+function SelectorProbe({ step }: { step: TraceStep }) {
+  const selectorMatches = step.selectorMatches ?? {};
+  const probedSelectors = Object.entries(selectorMatches);
+  const actionSelector =
+    typeof step.action.selector === "string" ? step.action.selector : null;
+  const rows =
+    actionSelector && !(actionSelector in selectorMatches)
+      ? [[actionSelector, null] as const, ...probedSelectors]
+      : probedSelectors;
+
+  if (rows.length === 0) {
+    return (
+      <EmptyState
+        icon={<MousePointerClick className="h-5 w-5" />}
+        title="No selector probe for this step"
+      />
+    );
+  }
+
+  return (
+    <div className="space-y-3 border border-[var(--border)] bg-[#101010] p-3">
+      <div>
+        <div className="text-xs font-semibold text-[var(--foreground)]">
+          Selector Probe
+        </div>
+        <p className="mt-1 text-xs leading-5 text-[var(--muted)]">
+          Match counts come from parsing the checkpoint HTML returned by
+          Firecrawl.
+        </p>
+      </div>
+      <div className="divide-y divide-[var(--border)] border border-[var(--border)]">
+        {rows.map(([selector, count]) => (
+          <div
+            key={selector}
+            className="grid grid-cols-[minmax(0,1fr)_88px] gap-3 bg-[#080808] p-3"
+          >
+            <code className="truncate text-xs text-[var(--muted-2)]">
+              {selector}
+            </code>
+            <div className="text-right">
+              {count == null ? (
+                <BracketTag>Not probed</BracketTag>
+              ) : (
+                <BracketTag tone={count > 0 ? "green" : "red"}>
+                  {count} match{count === 1 ? "" : "es"}
+                </BracketTag>
+              )}
+            </div>
+          </div>
+        ))}
+      </div>
+      {step.error ? (
+        <p className="text-xs leading-5 text-[var(--muted)]">{step.error}</p>
+      ) : null}
+    </div>
   );
 }
 
@@ -570,15 +562,6 @@ export function ExportPanel({
         </Button>
       </div>
     </section>
-  );
-}
-
-function TraceNote({ label, value }: { label: string; value: string }) {
-  return (
-    <div className="border-b border-r border-[var(--border)] p-4 last:border-r-0 md:border-b-0">
-      <div className="text-[11px] font-medium text-[var(--muted)]">{label}</div>
-      <p className="mt-2 text-xs leading-5 text-[var(--muted-2)]">{value}</p>
-    </div>
   );
 }
 

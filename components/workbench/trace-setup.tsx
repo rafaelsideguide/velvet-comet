@@ -5,7 +5,6 @@ import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { BracketTag } from "@/components/workbench/primitives";
 import type { Example, FirecrawlFormState } from "@/components/workbench/types";
-import { cn } from "@/lib/utils";
 
 export function TraceSetup(props: {
   examples: Example[];
@@ -23,6 +22,10 @@ export function TraceSetup(props: {
   onFirecrawlChange: (value: FirecrawlFormState) => void;
   onRun: () => void;
 }) {
+  const selectedExample = props.examples.find(
+    (example) => example.id === props.selectedExampleId,
+  );
+
   return (
     <section className="h-fit bg-[#080808]">
       <div className="border-b border-[var(--border)] p-4">
@@ -52,29 +55,38 @@ export function TraceSetup(props: {
       </div>
       <div className="space-y-4 p-4">
         <div className="space-y-2">
-          <Label>Example Traces</Label>
-          <div className="border border-[var(--border)]">
+          <Label htmlFor="scenario">Scenario</Label>
+          <select
+            id="scenario"
+            value={selectedExample?.id ?? ""}
+            onChange={(event) => {
+              const example = props.examples.find(
+                (item) => item.id === event.target.value,
+              );
+              if (example) props.onLoadExample(example);
+            }}
+            className="h-9 w-full rounded-[5px] border border-[var(--border)] bg-[#101010] px-3 text-sm outline-none focus:border-orange-500/70 focus:ring-2 focus:ring-[var(--ring)]"
+          >
+            <option value="">Custom workflow</option>
             {props.examples.map((example) => (
-              <button
-                key={example.id}
-                className={cn(
-                  "w-full border-b border-[var(--border)] p-3 text-left transition last:border-b-0",
-                  props.selectedExampleId === example.id
-                    ? "bg-[var(--accent-soft)]"
-                    : "bg-[#0b0b0b] hover:bg-[#111]",
-                )}
-                onClick={() => props.onLoadExample(example)}
-              >
-                <div className="flex items-center justify-between gap-2">
-                  <span className="text-sm font-medium">{example.label}</span>
-                  <BracketTag>{example.expectedDiagnosis}</BracketTag>
-                </div>
-                <p className="mt-1 text-xs leading-5 text-[var(--muted)]">
-                  {example.description}
-                </p>
-              </button>
+              <option key={example.id} value={example.id}>
+                {example.label}
+              </option>
             ))}
-          </div>
+          </select>
+          {selectedExample ? (
+            <div className="border border-[var(--border)] bg-[#101010] p-3">
+              <div className="flex items-center justify-between gap-2">
+                <span className="text-xs font-medium text-[var(--muted-2)]">
+                  Expected diagnosis
+                </span>
+                <BracketTag>{selectedExample.expectedDiagnosis}</BracketTag>
+              </div>
+              <p className="mt-2 text-xs leading-5 text-[var(--muted)]">
+                {selectedExample.description}
+              </p>
+            </div>
+          ) : null}
         </div>
 
         <div className="space-y-2">

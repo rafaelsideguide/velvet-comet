@@ -27,14 +27,11 @@ import {
 } from "@/components/workbench/defaults";
 import { BracketTag, toneForStatus } from "@/components/workbench/primitives";
 import {
-  BeforeAfterPanel,
   CheckpointInspector,
   DiagnosisPanel,
   ExportPanel,
-  MetricStrip,
   OutcomePanel,
   TimelinePanel,
-  TraceFidelityPanel,
 } from "@/components/workbench/trace-panels";
 import { TraceSetup } from "@/components/workbench/trace-setup";
 import type { Example, ExamplesResponse } from "@/components/workbench/types";
@@ -62,6 +59,7 @@ export function Workbench() {
     bundledRecordedTrace.failedStepIndex ?? 0,
   );
   const [isRunning, setIsRunning] = useState(false);
+  const [isReplayingDemo, setIsReplayingDemo] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [copyState, setCopyState] = useState<"idle" | "copied">("idle");
   const [redactedExport, setRedactedExport] = useState(true);
@@ -102,10 +100,31 @@ export function Workbench() {
   }
 
   function loadRecordedTrace() {
-    if (!recordedTrace) return;
-    setReport(recordedTrace);
+    const trace = recordedTrace ?? bundledRecordedTrace;
+    if (!trace) return;
+
+    const matchingExample =
+      examples.find((example) => example.id === "selector-missing-books") ??
+      examples[0];
+    if (matchingExample) {
+      loadExample(matchingExample, false);
+    } else {
+      setUrl(trace.url);
+      setActionsJson(JSON.stringify(trace.actions, null, 2));
+      setChecksJson(JSON.stringify(trace.checks, null, 2));
+      setFirecrawl(defaultFirecrawl);
+    }
+
+    setReport({ ...trace, steps: [...trace.steps] });
+    setSelectedStepIndex(0);
     setError(null);
     setCopyState("idle");
+    setIsReplayingDemo(true);
+
+    window.setTimeout(() => {
+      setSelectedStepIndex(trace.failedStepIndex ?? 0);
+      setIsReplayingDemo(false);
+    }, 650);
   }
 
   async function runTrace() {
@@ -173,13 +192,15 @@ export function Workbench() {
             <Hero
               report={report}
               recordedTrace={recordedTrace}
+              isReplayingDemo={isReplayingDemo}
               onReplay={loadRecordedTrace}
             />
 
-            <MetricStrip report={report} isRunning={isRunning} />
-            <OutcomePanel report={report} selectedStep={selectedStep} />
-            <BeforeAfterPanel report={report} />
-            <TraceFidelityPanel report={report} />
+            <OutcomePanel
+              report={report}
+              selectedStep={selectedStep}
+              isRunning={isRunning}
+            />
 
             <div className="grid grid-cols-1 xl:grid-cols-[360px_minmax(0,1fr)] 2xl:grid-cols-[360px_minmax(320px,0.95fr)_minmax(360px,1.2fr)]">
               <div
@@ -323,10 +344,12 @@ function TopBar() {
 function Hero({
   report,
   recordedTrace,
+  isReplayingDemo,
   onReplay,
 }: {
   report: TraceReport | null;
   recordedTrace: TraceReport | null;
+  isReplayingDemo: boolean;
   onReplay: () => void;
 }) {
   return (
@@ -349,7 +372,7 @@ function Hero({
             className="rounded-[5px]"
           >
             <Play className="h-3.5 w-3.5" />
-            Replay demo
+            {isReplayingDemo ? "Replaying" : "Replay demo"}
           </Button>
           <BracketTag tone="orange">
             {report?.mode === "recorded" ? "Recorded" : "Live"}

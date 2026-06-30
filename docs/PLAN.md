@@ -104,7 +104,7 @@ That would reduce cost, avoid replay drift, and make trace fidelity stronger. Th
 
 ## Modules
 
-- `components/workbench.tsx`: dashboard shell, recorded replay, live run flow, timeline, inspector, diagnosis, cost/fidelity, redacted exports.
+- `components/workbench.tsx`: dashboard shell, recorded replay, live run flow, timeline, inspector, diagnosis, and redacted exports.
 - `lib/trace-schema.ts`: Zod schemas for actions, checks, trace reports, and modes.
 - `lib/examples.ts`: live example payloads.
 - `lib/recorded-trace.ts`: bundled first-load trace.

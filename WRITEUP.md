@@ -28,6 +28,17 @@ In the demo I would start on the recorded failure trace, then run the three buil
 
 The UI is Firecrawl-style on purpose: dark operator shell, compact metrics, orange primary action, timeline rows, screenshot/text/raw/code inspector, and export controls. The first thing I want the reviewer to see after a run is the answer: which step failed, what Firecrawl saw, and what I would try next.
 
+## How to run the demo quickly
+
+```bash
+npm install
+npm run dev
+```
+
+Then open `http://localhost:3000`. The app starts on a bundled recorded trace, so the reviewer can inspect the complete failure report without a Firecrawl API key or credits. The **Replay demo** button reloads that recorded trace and walks the selection back to the failed step.
+
+Live runs are optional. Add `FIRECRAWL_API_KEY=...` to `.env`, choose a scenario, and click **Run**. The same workflow executes through Firecrawl prefix replay. I also added `npm test`, `npm run typecheck`, and `npm run build` as the verification path.
+
 ## What I deliberately did not build
 
 I did **not** build a generic Playwright IDE. The product surface is Firecrawl action observability, not arbitrary browser automation authoring.
@@ -52,6 +63,25 @@ For the code walkthrough, I would start at `app/api/traces/route.ts`, then follo
 - `components/workbench.tsx` for the UI flow
 
 The current demo stores traces in memory. That is enough for local export and reload during the session; production should use durable trace storage with retention and redaction controls because screenshots and markdown can contain sensitive page data.
+
+The production API contract I would want Firecrawl's browser runner to emit is roughly:
+
+```ts
+{
+  runId: "run_123",
+  stepIndex: 3,
+  action: { type: "click", selector: "[data-testid='export-table']" },
+  status: "failed",
+  durationMs: 1842,
+  url: "https://customer-app.example/report",
+  title: "Report builder",
+  screenshotUrl: "firecrawl://trace/run_123/step_3.png",
+  selectorMatches: { "[data-testid='export-table']": 0 },
+  error: "Element not found"
+}
+```
+
+That native event stream would remove replay drift, reduce cost, and make trace fidelity stronger than the external prototype.
 
 ## One thing AI got wrong
 
