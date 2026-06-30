@@ -12,15 +12,15 @@ I built **Action Trace Workbench**, a live Next.js dashboard for debugging Firec
 
 - failed step index
 - action timeline with duration and status
-- screenshot and markdown/text checkpoint evidence
+- screenshot, markdown/text, and selector checkpoint evidence
 - raw Firecrawl response
 - deterministic diagnosis code
 - suggested fix
-- JSON and Markdown export
+- JSON, Markdown, and redacted support-summary export
 
-The app is intentionally live-only. It uses the `FIRECRAWL_API_KEY` from `.env` and calls Firecrawl for every run. Under the hood it uses **prefix replay** with `POST /v2/scrape`: for step N, it runs actions `[0..N]` and requests markdown plus screenshot. That is more expensive than native runner instrumentation, but it is honest, buildable externally, and proves the product shape without changing Firecrawl internals.
+The app opens with a bundled recorded trace so the reviewer immediately sees the finished failure state without spending credits. Live runs use the `FIRECRAWL_API_KEY` from `.env` and call Firecrawl on demand. Under the hood live mode uses **prefix replay** with `POST /v2/scrape`: for step N, it runs actions `[0..N]` and requests markdown, HTML, and screenshot. The returned HTML is parsed for selector checks, so `selector_exists` evidence is based on actual DOM match counts. Prefix replay is more expensive than native runner instrumentation, but it is honest, buildable externally, and proves the product shape without changing Firecrawl internals.
 
-In the demo I would run the three built-in live examples:
+In the demo I would start on the recorded failure trace, then run the three built-in live examples if time and credits allow:
 
 1. **Missing selector after product navigation**: Books to Scrape passes setup steps, then fails on `[data-testid='export-table']`; the workbench identifies step 4 and classifies `SELECTOR_NOT_FOUND`.
 2. **Unexpected navigation**: example.com click succeeds but leaves the expected URL; the workbench classifies `NAVIGATION_CHANGED`.

@@ -1,9 +1,9 @@
 import { z } from "zod";
 
-export const TraceModeSchema = z.literal("live");
-export const TraceStatusSchema = z.enum(["passed", "failed", "partial", "invalid"]);
-export const StepStatusSchema = z.enum(["pending", "passed", "failed", "skipped"]);
-export const DiagnosisCodeSchema = z.enum([
+const TraceModeSchema = z.enum(["live", "recorded"]);
+const TraceStatusSchema = z.enum(["passed", "failed", "partial", "invalid"]);
+const StepStatusSchema = z.enum(["pending", "passed", "failed", "skipped"]);
+const DiagnosisCodeSchema = z.enum([
   "SELECTOR_NOT_FOUND",
   "WAIT_TIMEOUT",
   "NAVIGATION_CHANGED",
@@ -16,7 +16,7 @@ export const DiagnosisCodeSchema = z.enum([
 
 const selector = z.string().min(1).max(1000);
 
-export const WaitActionSchema = z
+const WaitActionSchema = z
   .object({
     type: z.literal("wait"),
     selector: selector.optional(),
@@ -26,40 +26,40 @@ export const WaitActionSchema = z
     message: "wait requires selector or milliseconds"
   });
 
-export const ClickActionSchema = z.object({
+const ClickActionSchema = z.object({
   type: z.literal("click"),
   selector
 });
 
-export const WriteActionSchema = z.object({
+const WriteActionSchema = z.object({
   type: z.literal("write"),
   text: z.string().min(1).max(5000)
 });
 
-export const FillActionSchema = z.object({
+const FillActionSchema = z.object({
   type: z.literal("fill"),
   selector,
   text: z.string().min(0).max(5000)
 });
 
-export const PressActionSchema = z.object({
+const PressActionSchema = z.object({
   type: z.literal("press"),
   key: z.string().min(1).max(80)
 });
 
-export const ScrollActionSchema = z.object({
+const ScrollActionSchema = z.object({
   type: z.literal("scroll"),
   selector: selector.optional(),
   direction: z.enum(["up", "down", "left", "right"]).optional(),
   amount: z.number().int().min(1).max(10000).optional()
 });
 
-export const ScreenshotActionSchema = z.object({
+const ScreenshotActionSchema = z.object({
   type: z.literal("screenshot"),
   fullPage: z.boolean().optional()
 });
 
-export const ExecuteJavascriptActionSchema = z
+const ExecuteJavascriptActionSchema = z
   .object({
     type: z.literal("executeJavascript"),
     code: z.string().min(1).max(8000).optional(),
@@ -69,7 +69,7 @@ export const ExecuteJavascriptActionSchema = z
     message: "executeJavascript requires code or script"
   });
 
-export const FirecrawlActionSchema = z.union([
+const FirecrawlActionSchema = z.union([
   WaitActionSchema,
   ClickActionSchema,
   WriteActionSchema,
@@ -80,7 +80,7 @@ export const FirecrawlActionSchema = z.union([
   ExecuteJavascriptActionSchema
 ]);
 
-export const CheckSchema = z.discriminatedUnion("type", [
+const CheckSchema = z.discriminatedUnion("type", [
   z.object({
     type: z.literal("selector_exists"),
     selector
@@ -99,7 +99,7 @@ export const CheckSchema = z.discriminatedUnion("type", [
   })
 ]);
 
-export const FirecrawlOptionsSchema = z.object({
+const FirecrawlOptionsSchema = z.object({
   waitFor: z.number().int().min(0).max(60000).default(500),
   timeout: z.number().int().min(1000).max(180000).default(60000),
   mobile: z.boolean().default(false),
@@ -126,7 +126,7 @@ export const TraceRequestInputSchema = z.object({
   firecrawl: FirecrawlOptionsSchema.default({})
 });
 
-export const DiagnosisSchema = z.object({
+const DiagnosisSchema = z.object({
   code: DiagnosisCodeSchema,
   message: z.string(),
   evidence: z.array(z.string()),
@@ -134,7 +134,7 @@ export const DiagnosisSchema = z.object({
   relatedOptions: z.array(z.string()).default([])
 });
 
-export const TraceStepSchema = z.object({
+const TraceStepSchema = z.object({
   index: z.number().int().min(0),
   action: z.record(z.unknown()),
   status: StepStatusSchema,
@@ -142,6 +142,7 @@ export const TraceStepSchema = z.object({
   url: z.string().optional(),
   title: z.string().optional(),
   textExcerpt: z.string().optional(),
+  selectorMatches: z.record(z.number().int().min(0)).optional(),
   screenshotBase64: z.string().optional(),
   generatedCode: z.string().optional(),
   error: z.string().optional(),
@@ -173,9 +174,6 @@ export const TraceReportSchema = z.object({
   steps: z.array(TraceStepSchema)
 });
 
-export type TraceMode = z.infer<typeof TraceModeSchema>;
-export type TraceStatus = z.infer<typeof TraceStatusSchema>;
-export type StepStatus = z.infer<typeof StepStatusSchema>;
 export type DiagnosisCode = z.infer<typeof DiagnosisCodeSchema>;
 export type FirecrawlAction = z.infer<typeof FirecrawlActionSchema>;
 export type TraceCheck = z.infer<typeof CheckSchema>;

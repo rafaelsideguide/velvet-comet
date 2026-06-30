@@ -1,7 +1,12 @@
-import { translateActionToPlaywright } from "@/lib/action-translator";
-import { buildDiagnosis, classifyStepFailure, evaluateChecks } from "@/lib/trace-analyzer";
-import { defaultFirecrawlOptions, getExample } from "@/lib/examples";
+import * as cheerio from "cheerio";
+import {
+  buildDiagnosis,
+  classifyStepFailure,
+  evaluateChecks,
+} from "@/lib/trace-analyzer";
+import { defaultFirecrawlOptions } from "@/lib/examples";
 import { FirecrawlTraceClient } from "@/lib/firecrawl-trace-client";
+import { recordedTrace } from "@/lib/recorded-trace";
 import {
   normalizeActions,
   TraceReportSchema,
@@ -9,10 +14,12 @@ import {
   type FirecrawlAction,
   type TraceReport,
   type TraceRequestInput,
-  type TraceStep
+  type TraceStep,
 } from "@/lib/trace-schema";
 
 export async function runTrace(input: TraceRequestInput): Promise<TraceReport> {
+  if (input.mode === "recorded") return recordedTrace;
+
   const id = `trace_${Date.now().toString(36)}`;
   const firecrawl = { ...defaultFirecrawlOptions, ...input.firecrawl };
 
@@ -25,7 +32,7 @@ export async function runTrace(input: TraceRequestInput): Promise<TraceReport> {
         id,
         input: { ...input, firecrawl },
         index: error.index,
-        message: error.message
+        message: error.message,
       });
     }
     throw error;
@@ -34,7 +41,11 @@ export async function runTrace(input: TraceRequestInput): Promise<TraceReport> {
   return runLiveTrace({ ...input, firecrawl }, actions, id);
 }
 
-async function runLiveTrace(input: TraceRequestInput, actions: FirecrawlAction[], id: string): Promise<TraceReport> {
+async function runLiveTrace(
+  input: TraceRequestInput,
+  actions: FirecrawlAction[],
+  id: string,
+): Promise<TraceReport> {
   const client = new FirecrawlTraceClient();
   const createdAt = new Date().toISOString();
   const startedAt = Date.now();
@@ -50,28 +61,35 @@ async function runLiveTrace(input: TraceRequestInput, actions: FirecrawlAction[]
       id,
       input,
       createdAt,
-      message: "FIRECRAWL_API_KEY is required for live mode."
+      message: "FIRECRAWL_API_KEY is required for live mode.",
     });
   }
 
   try {
     for (let index = 0; index < actions.length; index += 1) {
       const action = actions[index];
-      const translated = translateActionToPlaywright(action);
-      warnings.push(...translated.warnings.map((warning) => `Step ${index + 1}: ${warning}`));
+      warnings.push(
+        ...actionWarnings(action).map(
+          (warning) => `Step ${index + 1}: ${warning}`,
+        ),
+      );
       const startedAt = Date.now();
       let raw: unknown;
       let step: TraceStep;
 
       try {
-        raw = await client.scrapeWithActions(input, actions.slice(0, index + 1));
+        raw = await client.scrapeWithActions(
+          input,
+          actions.slice(0, index + 1),
+        );
         firecrawlCalls += 1;
         step = scrapeResponseToStep({
           index,
           action,
+          selectorsToCheck: selectorsForChecks(input.checks),
           generatedCode: `POST /v2/scrape with actions[0..${index}]`,
           raw,
-          durationMs: Date.now() - startedAt
+          durationMs: Date.now() - startedAt,
         });
         scrapeId = scrapeId ?? extractScrapeId(raw);
       } catch (error) {
@@ -86,10 +104,11 @@ async function runLiveTrace(input: TraceRequestInput, actions: FirecrawlAction[]
           url: previousStep?.url,
           title: previousStep?.title,
           textExcerpt: previousStep?.textExcerpt,
+          selectorMatches: previousStep?.selectorMatches,
           screenshotBase64: previousStep?.screenshotBase64,
           generatedCode: `POST /v2/scrape with actions[0..${index}]`,
           error: message,
-          raw: { error: message }
+          raw: { error: message },
         };
       }
 
@@ -97,7 +116,7 @@ async function runLiveTrace(input: TraceRequestInput, actions: FirecrawlAction[]
         failedStepIndex = index;
         diagnosis = buildDiagnosis(classifyStepFailure(action, step), {
           step,
-          action
+          action,
         });
         steps.push(step);
         appendSkippedSteps(steps, actions, index + 1);
@@ -108,7 +127,7 @@ async function runLiveTrace(input: TraceRequestInput, actions: FirecrawlAction[]
         checks: input.checks,
         action,
         step,
-        isFinalStep: index === actions.length - 1
+        isFinalStep: index === actions.length - 1,
       });
       if (!checkResult.ok) {
         step.status = "failed";
@@ -117,7 +136,7 @@ async function runLiveTrace(input: TraceRequestInput, actions: FirecrawlAction[]
         diagnosis = buildDiagnosis(checkResult.failure.code, {
           step,
           action,
-          checkFailure: checkResult.failure
+          checkFailure: checkResult.failure,
         });
         steps.push(step);
         appendSkippedSteps(steps, actions, index + 1);
@@ -135,7 +154,7 @@ async function runLiveTrace(input: TraceRequestInput, actions: FirecrawlAction[]
         createdAt,
         scrapeId,
         firecrawlCalls,
-        message
+        message,
       });
     }
     const index = steps.length;
@@ -145,10 +164,13 @@ async function runLiveTrace(input: TraceRequestInput, actions: FirecrawlAction[]
       status: "failed",
       durationMs: Date.now() - startedAt,
       error: message,
-      raw: { error: message }
+      raw: { error: message },
     };
     failedStepIndex = index;
-    diagnosis = buildDiagnosis("FIRECRAWL_ERROR", { step, action: actions[index] });
+    diagnosis = buildDiagnosis("FIRECRAWL_ERROR", {
+      step,
+      action: actions[index],
+    });
     steps.push(step);
     appendSkippedSteps(steps, actions, index + 1);
   }
@@ -161,7 +183,9 @@ async function runLiveTrace(input: TraceRequestInput, actions: FirecrawlAction[]
       diagnosis = buildDiagnosis("EMPTY_EXTRACTION", {
         step: lastStep,
         action: actions[lastStep.index],
-        extraEvidence: [`Final text excerpt length: ${(lastStep.textExcerpt ?? "").trim().length}`]
+        extraEvidence: [
+          `Final text excerpt length: ${(lastStep.textExcerpt ?? "").trim().length}`,
+        ],
       });
     }
   }
@@ -181,14 +205,16 @@ async function runLiveTrace(input: TraceRequestInput, actions: FirecrawlAction[]
       stepsPlanned: actions.length,
       stepsCompleted: steps.filter((step) => step.status === "passed").length,
       firecrawlCalls,
-      screenshotsCaptured: steps.filter((step) => Boolean(step.screenshotBase64)).length
+      screenshotsCaptured: steps.filter((step) =>
+        Boolean(step.screenshotBase64),
+      ).length,
     },
     diagnosis,
     warnings,
     actions: input.actions,
     checks: input.checks,
     firecrawl: input.firecrawl,
-    steps
+    steps,
   };
 
   return TraceReportSchema.parse(report);
@@ -198,7 +224,8 @@ function extractRawError(raw: unknown) {
   if (!raw || typeof raw !== "object") return null;
   const record = raw as Record<string, unknown>;
   for (const key of ["error", "stderr", "message"]) {
-    if (typeof record[key] === "string" && record[key]) return record[key] as string;
+    if (typeof record[key] === "string" && record[key])
+      return record[key] as string;
   }
   return null;
 }
@@ -206,17 +233,32 @@ function extractRawError(raw: unknown) {
 function scrapeResponseToStep(params: {
   index: number;
   action: FirecrawlAction;
+  selectorsToCheck: string[];
   generatedCode: string;
   raw: unknown;
   durationMs: number;
 }): TraceStep {
-  const raw = params.raw && typeof params.raw === "object" ? (params.raw as Record<string, unknown>) : {};
-  const data = raw.data && typeof raw.data === "object" ? (raw.data as Record<string, unknown>) : {};
-  const metadata = data.metadata && typeof data.metadata === "object" ? (data.metadata as Record<string, unknown>) : {};
+  const raw =
+    params.raw && typeof params.raw === "object"
+      ? (params.raw as Record<string, unknown>)
+      : {};
+  const data =
+    raw.data && typeof raw.data === "object"
+      ? (raw.data as Record<string, unknown>)
+      : {};
+  const metadata =
+    data.metadata && typeof data.metadata === "object"
+      ? (data.metadata as Record<string, unknown>)
+      : {};
   const success = raw.success !== false;
   const markdown = typeof data.markdown === "string" ? data.markdown : "";
-  const screenshot = typeof data.screenshot === "string" ? normalizeScreenshotBase64(data.screenshot) : undefined;
+  const html = typeof data.html === "string" ? data.html : "";
+  const screenshot =
+    typeof data.screenshot === "string"
+      ? normalizeScreenshotBase64(data.screenshot)
+      : undefined;
   const error = extractRawError(raw);
+  const selectorMatches = countSelectorMatches(html, params.selectorsToCheck);
 
   return {
     index: params.index,
@@ -224,20 +266,74 @@ function scrapeResponseToStep(params: {
     status: success ? "passed" : "failed",
     durationMs: Math.max(0, Math.round(params.durationMs)),
     url: typeof metadata.url === "string" ? metadata.url : undefined,
-    title: typeof metadata.title === "string" ? metadata.title.trim() : undefined,
+    title:
+      typeof metadata.title === "string" ? metadata.title.trim() : undefined,
     textExcerpt: markdown.slice(0, 1200),
+    selectorMatches,
     screenshotBase64: screenshot,
     generatedCode: params.generatedCode,
-    error: success ? undefined : error ?? "Firecrawl scrape prefix failed.",
-    raw
+    error: success ? undefined : (error ?? "Firecrawl scrape prefix failed."),
+    raw: compactRawResponse(raw),
   };
+}
+
+function compactRawResponse(raw: Record<string, unknown>) {
+  const data =
+    raw.data && typeof raw.data === "object"
+      ? { ...(raw.data as Record<string, unknown>) }
+      : undefined;
+  if (data) {
+    if (typeof data.html === "string")
+      data.html = `[${data.html.length} html chars captured for selector checks]`;
+    if (typeof data.screenshot === "string")
+      data.screenshot = `[${data.screenshot.length} screenshot chars captured separately]`;
+    if (typeof data.markdown === "string" && data.markdown.length > 1200) {
+      data.markdown = `${data.markdown.slice(0, 1200)}...`;
+    }
+  }
+  return data ? { ...raw, data } : raw;
+}
+
+function selectorsForChecks(checks: TraceRequestInput["checks"]) {
+  return checks.flatMap((check) =>
+    check.type === "selector_exists" ? [check.selector] : [],
+  );
+}
+
+function actionWarnings(action: FirecrawlAction) {
+  if (action.type === "write") {
+    return [
+      "write action uses the current focused element; add a click/focus action before it when tracing typed input.",
+    ];
+  }
+  return [];
+}
+
+function countSelectorMatches(html: string, selectors: string[]) {
+  if (!html || selectors.length === 0) return undefined;
+  const $ = cheerio.load(html);
+  const matches: Record<string, number> = {};
+  for (const selector of selectors) {
+    try {
+      matches[selector] = $(selector).length;
+    } catch {
+      matches[selector] = 0;
+    }
+  }
+  return matches;
 }
 
 function extractScrapeId(raw: unknown) {
   if (!raw || typeof raw !== "object") return undefined;
   const record = raw as Record<string, unknown>;
-  const data = record.data && typeof record.data === "object" ? (record.data as Record<string, unknown>) : {};
-  const metadata = data.metadata && typeof data.metadata === "object" ? (data.metadata as Record<string, unknown>) : {};
+  const data =
+    record.data && typeof record.data === "object"
+      ? (record.data as Record<string, unknown>)
+      : {};
+  const metadata =
+    data.metadata && typeof data.metadata === "object"
+      ? (data.metadata as Record<string, unknown>)
+      : {};
   return typeof metadata.scrapeId === "string" ? metadata.scrapeId : undefined;
 }
 
@@ -247,14 +343,18 @@ function normalizeScreenshotBase64(value: string) {
   return index >= 0 ? value.slice(index + marker.length) : value;
 }
 
-function appendSkippedSteps(steps: TraceStep[], actions: FirecrawlAction[], startIndex: number) {
+function appendSkippedSteps(
+  steps: TraceStep[],
+  actions: FirecrawlAction[],
+  startIndex: number,
+) {
   for (let index = startIndex; index < actions.length; index += 1) {
     steps.push({
       index,
       action: actions[index],
       status: "skipped",
       durationMs: 0,
-      error: "Skipped after first failure."
+      error: "Skipped after first failure.",
     });
   }
 }
@@ -272,7 +372,7 @@ function unsupportedActionReport(params: {
     status: "failed",
     durationMs: 0,
     error: params.message,
-    raw: { validation: true }
+    raw: { validation: true },
   };
   return {
     id: params.id,
@@ -287,12 +387,12 @@ function unsupportedActionReport(params: {
       stepsPlanned: params.input.actions.length,
       stepsCompleted: 0,
       firecrawlCalls: 0,
-      screenshotsCaptured: 0
+      screenshotsCaptured: 0,
     },
     diagnosis: buildDiagnosis("UNSUPPORTED_ACTION", {
       step,
       action: params.input.actions[params.index],
-      extraEvidence: [params.message]
+      extraEvidence: [params.message],
     }),
     warnings: [],
     actions: params.input.actions,
@@ -303,7 +403,7 @@ function unsupportedActionReport(params: {
         index,
         action,
         status: "pending" as const,
-        durationMs: 0
+        durationMs: 0,
       })),
       step,
       ...params.input.actions.slice(params.index + 1).map((action, offset) => ({
@@ -311,9 +411,9 @@ function unsupportedActionReport(params: {
         action,
         status: "skipped" as const,
         durationMs: 0,
-        error: "Skipped because request validation failed."
-      }))
-    ]
+        error: "Skipped because request validation failed.",
+      })),
+    ],
   };
 }
 
@@ -332,7 +432,7 @@ function firecrawlErrorReport(params: {
     status: "failed",
     durationMs: 0,
     error: params.message,
-    raw: params.setupRaw
+    raw: params.setupRaw,
   };
   const completedAt = new Date().toISOString();
   return {
@@ -342,19 +442,20 @@ function firecrawlErrorReport(params: {
     url: params.input.url,
     createdAt: params.createdAt,
     completedAt,
-    durationMs: new Date(completedAt).getTime() - new Date(params.createdAt).getTime(),
+    durationMs:
+      new Date(completedAt).getTime() - new Date(params.createdAt).getTime(),
     scrapeId: params.scrapeId,
     failedStepIndex: 0,
     summary: {
       stepsPlanned: params.input.actions.length,
       stepsCompleted: 0,
       firecrawlCalls: params.firecrawlCalls ?? 0,
-      screenshotsCaptured: 0
+      screenshotsCaptured: 0,
     },
     diagnosis: buildDiagnosis("FIRECRAWL_ERROR", {
       step,
       action: params.input.actions[0],
-      extraEvidence: [params.message]
+      extraEvidence: [params.message],
     }),
     warnings: [],
     actions: params.input.actions,
@@ -367,21 +468,8 @@ function firecrawlErrorReport(params: {
         action,
         status: "skipped" as const,
         durationMs: 0,
-        error: "Skipped because Firecrawl setup failed."
-      }))
-    ]
-  };
-}
-
-export function examplePayload(exampleId: string) {
-  const example = getExample(exampleId);
-  if (!example) return null;
-  return {
-    mode: "live" as const,
-    exampleId: example.id,
-    url: example.url,
-    actions: example.actions,
-    checks: example.checks,
-    firecrawl: defaultFirecrawlOptions
+        error: "Skipped because Firecrawl setup failed.",
+      })),
+    ],
   };
 }

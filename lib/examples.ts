@@ -1,6 +1,6 @@
 import type { DiagnosisCode, FirecrawlAction, FirecrawlOptions, TraceCheck } from "@/lib/trace-schema";
 
-export type ExampleDefinition = {
+type ExampleDefinition = {
   id: string;
   label: string;
   description: string;
@@ -12,7 +12,7 @@ export type ExampleDefinition = {
 
 export const defaultFirecrawlOptions: FirecrawlOptions = {
   waitFor: 500,
-  timeout: 15000,
+  timeout: 30000,
   mobile: false,
   proxy: "auto",
   onlyMainContent: true
@@ -56,7 +56,3 @@ export const examples: ExampleDefinition[] = [
     expectedDiagnosis: "WAIT_TIMEOUT"
   }
 ];
-
-export function getExample(id: string | undefined) {
-  return examples.find((example) => example.id === id) ?? null;
-}

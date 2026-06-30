@@ -109,9 +109,7 @@ export function buildDiagnosis(code: DiagnosisCode, context: {
     code: "FIRECRAWL_ERROR",
     message: "Firecrawl returned an upstream error before the trace runner could narrow it further.",
     evidence,
-    suggestedFix: hasInteractRuntimeMismatch(evidence)
-      ? "The live Interact runtime rejected the generated Playwright code. Confirm Firecrawl's code execution wrapper before debugging selectors or waits."
-      : "Retry once, then inspect the raw response and consider proxy, timeout, or location changes if the page is protected or slow.",
+    suggestedFix: "Retry once, then inspect the raw response and consider proxy, timeout, or location changes if the page is protected or slow.",
     relatedOptions: ["proxy", "timeout", "location.country", "mobile"]
   };
 }
@@ -178,6 +176,9 @@ export function evaluateChecks(params: {
 
     const text = params.step.textExcerpt ?? "";
     if (check.type === "selector_exists") {
+      const matchCount = params.step.selectorMatches?.[check.selector];
+      if (matchCount && matchCount > 0) continue;
+
       return {
         ok: false,
         failure: {
@@ -188,7 +189,9 @@ export function evaluateChecks(params: {
           message: `The live checkpoint could not verify selector ${check.selector}.`,
           evidence: [
             `Expected selector: ${check.selector}`,
-            "Prefix replay captures markdown and screenshot evidence, but no DOM confirmation was returned for this selector check."
+            matchCount == null
+              ? "Firecrawl did not return HTML for this checkpoint, so the selector could not be evaluated."
+              : `Parsed HTML match count: ${matchCount}`
           ]
         }
       };
@@ -218,7 +221,7 @@ export function evaluateChecks(params: {
   return { ok: true as const };
 }
 
-export function hasBlockSignal(value: string | undefined) {
+function hasBlockSignal(value: string | undefined) {
   if (!value) return false;
   const lower = value.toLowerCase();
   return blockSignals.some((signal) => lower.includes(signal));
@@ -227,9 +230,4 @@ export function hasBlockSignal(value: string | undefined) {
 function getSelector(action: FirecrawlAction | Record<string, unknown> | undefined) {
   if (!action || !("selector" in action)) return null;
   return typeof action.selector === "string" ? action.selector : null;
-}
-
-function hasInteractRuntimeMismatch(evidence: string[]) {
-  const text = evidence.join(" ").toLowerCase();
-  return text.includes("await is only valid") || text.includes("illegal return statement") || text.includes("repl:");
 }

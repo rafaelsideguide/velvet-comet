@@ -1,8 +1,15 @@
 import { NextResponse } from "next/server";
-import { traceToMarkdown } from "@/lib/report-export";
+import {
+  redactTraceReport,
+  traceToMarkdown,
+  traceToSupportSummary,
+} from "@/lib/report-export";
 import { getTrace } from "@/lib/trace-store";
 
-export async function GET(request: Request, context: { params: Promise<{ id: string }> }) {
+export async function GET(
+  request: Request,
+  context: { params: Promise<{ id: string }> },
+) {
   const { id } = await context.params;
   const report = getTrace(id);
   if (!report) {
@@ -11,20 +18,33 @@ export async function GET(request: Request, context: { params: Promise<{ id: str
 
   const url = new URL(request.url);
   const format = url.searchParams.get("format") ?? "json";
+  const redacted = url.searchParams.get("redacted") === "true";
 
   if (format === "markdown") {
-    return new NextResponse(traceToMarkdown(report), {
+    return new NextResponse(traceToMarkdown(report, { redacted }), {
       headers: {
         "Content-Type": "text/markdown; charset=utf-8",
-        "Content-Disposition": `attachment; filename="${id}.md"`
-      }
+        "Content-Disposition": `attachment; filename="${id}${redacted ? "-redacted" : ""}.md"`,
+      },
     });
   }
 
-  return new NextResponse(JSON.stringify(report, null, 2), {
-    headers: {
-      "Content-Type": "application/json; charset=utf-8",
-      "Content-Disposition": `attachment; filename="${id}.json"`
-    }
-  });
+  if (format === "support") {
+    return new NextResponse(traceToSupportSummary(report, { redacted }), {
+      headers: {
+        "Content-Type": "text/plain; charset=utf-8",
+        "Content-Disposition": `attachment; filename="${id}${redacted ? "-redacted" : ""}-support.txt"`,
+      },
+    });
+  }
+
+  return new NextResponse(
+    JSON.stringify(redacted ? redactTraceReport(report) : report, null, 2),
+    {
+      headers: {
+        "Content-Type": "application/json; charset=utf-8",
+        "Content-Disposition": `attachment; filename="${id}${redacted ? "-redacted" : ""}.json"`,
+      },
+    },
+  );
 }
